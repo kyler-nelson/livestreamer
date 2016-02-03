@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path="src"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/minimal-json"/>
+	<classpathentry kind="lib" path="C:/eclipse-personal/lib/scribe-1.3.5.jar" sourcepath="C:/Users/Kyler/.sourceattacher/scribe-1.3.5-sources.jar"/>
+	<classpathentry kind="lib" path="C:/eclipse-personal/lib/jna-3.5.2.jar" sourcepath="C:/Users/Kyler/.sourceattacher/jna-3.5.2-sources.jar"/>
+	<classpathentry kind="lib" path="C:/eclipse-personal/lib/vlcj-3.1.0.jar" sourcepath="C:/Users/Kyler/.sourceattacher/vlcj-3.1.0-sources.jar"/>
+	<classpathentry kind="output" path="bin"/>
+</classpath>

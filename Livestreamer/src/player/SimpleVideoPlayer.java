@@ -1,0 +1,639 @@
+package player;
+import java.awt.Adjustable;
+import java.awt.BorderLayout;
+import java.awt.Canvas;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.WindowEvent;
+import java.awt.event.WindowListener;
+import java.io.File;
+import java.text.SimpleDateFormat;
+import java.util.HashSet;
+import java.util.Hashtable;
+import java.util.Set;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JSlider;
+import javax.swing.JToggleButton;
+import javax.swing.SwingUtilities;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
+
+import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.internal.libvlc_media_t;
+import uk.co.caprica.vlcj.logger.Logger;
+import uk.co.caprica.vlcj.player.DeinterlaceMode;
+import uk.co.caprica.vlcj.player.MediaPlayer;
+import uk.co.caprica.vlcj.player.MediaPlayerEventListener;
+import uk.co.caprica.vlcj.player.MediaPlayerFactory;
+import uk.co.caprica.vlcj.player.embedded.DefaultFullScreenStrategy;
+import uk.co.caprica.vlcj.player.embedded.EmbeddedMediaPlayer;
+import uk.co.caprica.vlcj.player.embedded.FullScreenStrategy;
+import uk.co.caprica.vlcj.player.embedded.videosurface.CanvasVideoSurface;
+
+//basic class of a videoplayer for one video
+public class SimpleVideoPlayer extends JFrame implements MediaPlayerEventListener, WindowListener{
+    private EmbeddedMediaPlayer mp;
+    private Timer t;
+    private JPanel screenPanel,controlsPanel;
+    private JSlider timeline;
+    private JButton play,back,forward;
+    private JToggleButton loop,mute;
+    private JSlider speed;
+    private CanvasVideoSurface scr;
+    private final String[] mediaOptions = {""};
+    private boolean syncTimeline=false;
+    private boolean looping=false;
+    private SimpleDateFormat ms;
+    private int jumpLength=1000;
+    private int  loopLength=6000;
+    
+    public SimpleVideoPlayer() {
+        super();
+        /*TODO new EnvironmentCheckerFactory().newEnvironmentChecker().checkEnvironment();
+         * if(RuntimeUtil.isWindows()) {
+                vlcArgs.add("--plugin-path=" + WindowsRuntimeUtil.getVlcInstallDir() + "\\plugins");
+            }
+         */
+        try
+        {
+            //we don't need any options
+            String[] libvlcArgs = {""};
+            String[] standardMediaOptions = {""}; 
+            
+            //System.out.println("libvlc version: " + LibVlc.INSTANCE.libvlc_get_version());
+            //setup Media Player
+            //TODO we have to deal with unloading things....
+            MediaPlayerFactory mediaPlayerFactory = new MediaPlayerFactory(libvlcArgs);
+            FullScreenStrategy fullScreenStrategy = new DefaultFullScreenStrategy(this);
+            mp = mediaPlayerFactory.newEmbeddedMediaPlayer(fullScreenStrategy);
+            mp.setStandardMediaOptions(standardMediaOptions);
+            //setup GUI
+            setSize(400, 300); //later we apply movie size
+            setAlwaysOnTop(true);
+            createUI();
+            setLayout();
+            addListeners(); //registering shortcuts is task of the outer plugin class!
+            //embed vlc player
+            scr= mediaPlayerFactory.newVideoSurface(new Canvas());
+            
+            scr.canvas().setVisible(true);
+            setVisible(true);
+            mp.setVideoSurface(scr);
+            mp.addMediaPlayerEventListener(this);
+            //mp.pause();
+            //jump(0);
+            //create updater
+            ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
+            executorService.scheduleAtFixedRate(new Runnable() {
+        //We have to do syncing in the main thread
+        public void run() {
+          SwingUtilities.invokeLater(new Runnable() {
+                  //here we update
+                public void run() {
+                    if (isPlaying()) updateTime(); //if the video is seeking we get a mess
+                }
+              });
+        }
+      }, 0L, 1000L, TimeUnit.MILLISECONDS);
+            //setDefaultCloseOperation(EXIT_ON_CLOSE);
+            addWindowListener(this);
+        }
+        catch (NoClassDefFoundError e)
+        {
+            System.err.println("Unable to find JNA Java library!");
+        }
+        catch (UnsatisfiedLinkError e)
+        {
+            System.err.println("Unable to find native libvlc library!");
+        }
+        
+    }
+
+    private void createUI() {
+        //setIconImage();
+        ms = new SimpleDateFormat("hh:mm:ss");
+        timeline = new JSlider(0,100,0);
+        timeline.setMajorTickSpacing(10);
+        timeline.setMajorTickSpacing(5);
+        timeline.setPaintTicks(true);
+        //TODO we need Icons instead
+        play= new JButton("play");
+        back= new JButton("<");
+        forward= new JButton(">");
+        loop= new JToggleButton("loop");
+        mute= new JToggleButton("mute");
+        speed = new JSlider(-200,200,0);
+        speed.setMajorTickSpacing(100);
+        speed.setPaintTicks(true);          
+        speed.setOrientation(Adjustable.VERTICAL);
+        Hashtable labelTable = new Hashtable ();
+        labelTable.put( new Integer( 0 ), new JLabel("1x") );
+        labelTable.put( new Integer( -200 ), new JLabel("-2x") );
+        labelTable.put( new Integer( 200 ), new JLabel("2x") );
+        speed.setLabelTable( labelTable );
+        speed.setPaintLabels(true);
+    }
+    
+    //creates a layout like the most mediaplayers are...
+    private void setLayout() {
+        this.setLayout(new BorderLayout());
+        screenPanel=new JPanel();
+        screenPanel.setLayout(new BorderLayout());
+        controlsPanel=new JPanel();
+        controlsPanel.setLayout(new FlowLayout());
+        add(screenPanel,BorderLayout.CENTER);
+        add(controlsPanel,BorderLayout.SOUTH);
+        //fill screen panel
+        screenPanel.add(scr.canvas(),BorderLayout.CENTER);
+        screenPanel.add(timeline,BorderLayout.SOUTH);
+        screenPanel.add(speed,BorderLayout.EAST);
+        controlsPanel.add(play);
+        controlsPanel.add(back);
+        controlsPanel.add(forward);
+        controlsPanel.add(loop);
+        controlsPanel.add(mute);
+        loop.setSelected(false);
+        mute.setSelected(false);
+    }
+
+    //add UI functionality
+    private void addListeners() {
+        timeline.addChangeListener(new ChangeListener() {
+            public void stateChanged(ChangeEvent e) {
+                if(!syncTimeline) //only if user moves the slider by hand
+                {
+                    if(!timeline.getValueIsAdjusting()) //and the slider is fixed
+                    {
+                        //recalc to 0.x percent value
+                        mp.setPosition((float)timeline.getValue()/100.0f);
+                    }                   
+                }
+            }
+            });
+        
+        play.addActionListener(new ActionListener() {
+            
+            public void actionPerformed(ActionEvent arg0) {
+                if(mp.isPlaying()) mp.pause(); else mp.play();              
+            }
+        });
+        
+        back.addActionListener(new ActionListener() {
+            
+            public void actionPerformed(ActionEvent arg0) {
+                backward();
+            }
+        });
+        
+        forward.addActionListener(new ActionListener() {
+            
+            public void actionPerformed(ActionEvent arg0) {
+                forward();
+            }
+        });
+        
+        loop.addActionListener(new ActionListener() {
+
+            public void actionPerformed(ActionEvent arg0) {
+                loop();
+            }
+        });
+        
+        mute.addActionListener(new ActionListener() {
+
+            public void actionPerformed(ActionEvent arg0) {
+                mute();
+            }
+        });
+        
+        speed.addChangeListener(new ChangeListener() {
+            
+            public void stateChanged(ChangeEvent arg0) {
+                if(!speed.getValueIsAdjusting()&&(mp.isPlaying()))
+                {
+                    int perc = speed.getValue();
+                    float ratio= (float) (perc/400f*1.75);
+                    ratio=ratio+(9/8);
+                    mp.setRate(ratio);
+                }
+                
+            }
+        });
+        
+    }   
+
+    public void finished(MediaPlayer arg0) {
+            
+    }
+
+    public void lengthChanged(MediaPlayer arg0, long arg1) {
+
+    }
+
+
+
+    public void paused(MediaPlayer arg0) {
+
+    }
+
+    public void playing(MediaPlayer arg0) {
+
+    }
+
+    public void positionChanged(MediaPlayer arg0, float arg1) {
+        
+    }
+
+    public void stopped(MediaPlayer arg0) {
+                
+    }
+
+    public void timeChanged(MediaPlayer arg0, long arg1) {
+
+    }
+    
+
+    public void windowActivated(WindowEvent arg0) { }
+
+    public void windowClosed(WindowEvent arg0) {    }
+
+    //we have to unload and disconnect to the VLC engine
+    public void windowClosing(WindowEvent evt) {
+        mp.release();
+        mp = null;
+        System.exit(0);
+      }
+
+    public void windowDeactivated(WindowEvent arg0) {   }
+
+    public void windowDeiconified(WindowEvent arg0) {   }
+
+    public void windowIconified(WindowEvent arg0) { }
+
+    public void windowOpened(WindowEvent arg0) {    }   
+    
+    public void setFile(File f)
+    {
+        String mediaPath = f.getAbsoluteFile().toString();
+        mp.playMedia(mediaPath, mediaOptions);
+        pack(); 
+    }
+    
+    public void play()
+    {
+        mp.play();
+    }
+    
+    public void jump(long time)
+    {
+        /*float pos = (float)mp.getLength()/(float)time;
+        mp.setPosition(pos);*/
+        mp.setTime(time);
+    }
+    
+    public long getTime()
+    {
+        return mp.getTime();
+    }
+    
+    public float getPosition()
+    {
+        return mp.getPosition();
+    }
+    
+    public boolean isPlaying()
+    {
+        return mp.isPlaying();
+    }
+    
+    //gets called by the Syncer thread to update all observers
+    public void updateTime ()
+    {
+        if(mp.isPlaying())
+        {
+          long millis=mp.getTime();
+          String s = String.format("%02d:%02d:%02d", //dont know why normal Java date utils doesn't format the time right
+          TimeUnit.MILLISECONDS.toHours(millis),
+          TimeUnit.MILLISECONDS.toMinutes(millis) - TimeUnit.HOURS.toMinutes(TimeUnit.MILLISECONDS.toHours(millis)), 
+          TimeUnit.MILLISECONDS.toSeconds(millis) - TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS.toMinutes(millis))
+        );
+            //setTitle(ms.format(new Time(sec)));
+          setTitle(s);
+            syncTimeline=true;
+            timeline.setValue(Math.round(mp.getPosition()*100));
+            syncTimeline=false;
+        }
+    }
+    
+    //allow externals to extend the ui
+    public void addComponent(JComponent c)
+    {
+        controlsPanel.add(c);
+        pack();
+    }
+
+    public long getLength() {       
+        return mp.getLength();
+    }
+
+    public void setDeinterlacer(DeinterlaceMode deinterlaceMode) {
+        mp.setDeinterlace(deinterlaceMode);
+        
+    }
+
+    public void setJumpLength(Integer integer) {
+        jumpLength=integer;
+        
+    }
+
+    public void setLoopLength(Integer integer) {
+        loopLength = integer;
+        
+    }
+
+    public void loop() {
+        if(looping)
+        {
+            t.cancel();
+            looping=false;
+        }
+        else            
+        {
+            final long resetpoint=(long) mp.getTime()-loopLength/2;
+            TimerTask ani=new TimerTask() {
+                
+                @Override
+                public void run() {
+                    mp.setTime(resetpoint);
+                }
+            };
+            t= new Timer();
+            t.schedule(ani,loopLength/2,loopLength); //first run a half looptime till reset
+            looping=true;
+            }
+        
+    }
+    
+    protected void mute() {
+        mp.mute();
+        
+    }
+
+    public void forward() {
+        mp.setTime((long) (mp.getTime()+jumpLength));
+    }
+
+    public void backward() {
+        mp.setTime((long) (mp.getTime()-jumpLength));
+        
+    }
+
+    public void removeVideo() {
+        if (mp.isPlaying()) mp.stop();
+        mp.release();
+        
+    }
+    
+    public void toggleSubs()
+    {
+        //vlc manages it's subtitles in a own list so we have to cycle trough
+        int spu = mp.getSpu();
+        if(spu > -1) {
+          spu++;
+          if(spu > mp.getSpuCount()) {
+            spu = -1;
+          }
+        }
+        else {
+          spu = 0;
+        }
+        mp.setSpu(spu);
+    }
+
+
+        public String getNativePlayerInfos() {
+            return "VLC "+LibVlc.INSTANCE.libvlc_get_version();
+        }
+
+        public void faster() {
+            speed.setValue(speed.getValue()+100);
+            
+        }
+
+        public void slower() {
+            speed.setValue(speed.getValue()-100);
+            
+        }
+
+        public void pause() {
+            if (mp.isPlaying()) mp.pause();
+            
+        }
+
+        public boolean playing() {
+            return mp.isPlaying();
+        }
+
+        public void error(MediaPlayer arg0) {
+            // TODO Auto-generated method stub
+            
+        }
+
+        public void mediaChanged(MediaPlayer arg0) {
+            // TODO Auto-generated method stub
+            
+        }
+
+        public boolean hasSubtitles() {
+            if (mp.getSpuCount()==0) return false; else   return true;
+        }
+
+        @Override
+        public void mediaChanged(MediaPlayer mediaPlayer, libvlc_media_t media,
+            String mrl)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void opening(MediaPlayer mediaPlayer)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void buffering(MediaPlayer mediaPlayer, float newCache)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void forward(MediaPlayer mediaPlayer)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void backward(MediaPlayer mediaPlayer)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void seekableChanged(MediaPlayer mediaPlayer, int newSeekable)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void pausableChanged(MediaPlayer mediaPlayer, int newPausable)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void titleChanged(MediaPlayer mediaPlayer, int newTitle)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void snapshotTaken(MediaPlayer mediaPlayer, String filename)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void videoOutput(MediaPlayer mediaPlayer, int newCount)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void scrambledChanged(MediaPlayer mediaPlayer, int newScrambled)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void elementaryStreamAdded(MediaPlayer mediaPlayer, int type,
+            int id)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void elementaryStreamDeleted(MediaPlayer mediaPlayer, int type,
+            int id)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void elementaryStreamSelected(MediaPlayer mediaPlayer, int type,
+            int id)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void mediaMetaChanged(MediaPlayer mediaPlayer, int metaType)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void mediaSubItemAdded(MediaPlayer mediaPlayer,
+            libvlc_media_t subItem)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void mediaDurationChanged(MediaPlayer mediaPlayer,
+            long newDuration)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void mediaParsedChanged(MediaPlayer mediaPlayer, int newStatus)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void mediaFreed(MediaPlayer mediaPlayer)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void mediaStateChanged(MediaPlayer mediaPlayer, int newState)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void newMedia(MediaPlayer mediaPlayer)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void subItemPlayed(MediaPlayer mediaPlayer, int subItemIndex)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void subItemFinished(MediaPlayer mediaPlayer, int subItemIndex)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+        @Override
+        public void endOfSubItems(MediaPlayer mediaPlayer)
+        {
+          // TODO Auto-generated method stub
+          
+        }
+
+    
+
+}
